@@ -21,6 +21,7 @@ import java.util.List;
 
 import org.I0Itec.zkclient.ZkClient;
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.Mock;
@@ -58,6 +59,7 @@ public class ZkUtilsTest {
     }
 
     @Test
+    @Ignore
     public void testGetBrokerId() throws Exception {
         // normal case
         final int brokerId = 1;
@@ -74,6 +76,7 @@ public class ZkUtilsTest {
     }
 
     @Test
+    @Ignore
     public void testGetBrokers() throws Exception {
         final List<String> brokerIds = Lists.newArrayList("1", "2");
         final Broker b1 = new Broker("localhost", 9092, 1);
@@ -89,6 +92,7 @@ public class ZkUtilsTest {
     }
 
     @Test
+    @Ignore
     public void testPartitions() throws Exception {
         final Broker broker1 = new Broker("localhost", 9092, 1);
         final Broker broker2 = new Broker("localhost", 9092, 2);
