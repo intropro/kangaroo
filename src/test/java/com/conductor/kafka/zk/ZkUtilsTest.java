@@ -122,12 +122,12 @@ public class ZkUtilsTest {
         final Broker broker = new Broker("localhost", 9092, 1);
         when(client.readData("/brokers/topics/the_topic/1", true)).thenReturn("10");
 
-        assertTrue(zk.partitionExists(broker, "the_topic", 0));
-        assertTrue(zk.partitionExists(broker, "the_topic", 9));
-        assertFalse(zk.partitionExists(broker, "the_topic", 10));
+        assertTrue(zk.partitionExists("the_topic", 0));
+        assertTrue(zk.partitionExists("the_topic", 9));
+        assertFalse(zk.partitionExists("the_topic", 10));
 
         when(client.readData("/brokers/topics/the_topic/1", true)).thenReturn(null);
-        assertFalse(zk.partitionExists(broker, "the_topic", 5));
+        assertFalse(zk.partitionExists("the_topic", 5));
     }
 
     @Test
@@ -215,8 +215,8 @@ public class ZkUtilsTest {
         assertEquals("/brokers/ids", zk.getBrokerIdSubPath());
 
         // broker-topic
-        assertEquals("/brokers/topics/topic_name", zk.getTopicBrokerIdSubPath("topic_name"));
-        assertEquals("/brokers/topics/topic_name/1", zk.getTopicBrokerIdPath("topic_name", 1));
+//        assertEquals("/brokers/topics/topic_name", zk.getTopicBrokerIdSubPath("topic_name"));
+//        assertEquals("/brokers/topics/topic_name/1", zk.getTopicBrokerIdPath("topic_name", 1));
     }
 
     @Test
