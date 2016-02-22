@@ -21,21 +21,18 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
 import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
-import com.google.common.collect.Ranges;
 import org.I0Itec.zkclient.ZkClient;
 import org.I0Itec.zkclient.exception.ZkMarshallingError;
 import org.I0Itec.zkclient.exception.ZkNoNodeException;
 import org.I0Itec.zkclient.serialize.ZkSerializer;
 import org.apache.hadoop.conf.Configuration;
-import org.codehaus.jackson.map.ObjectMapper;
+import org.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 import static java.lang.String.format;
 
@@ -82,15 +79,24 @@ public class ZkUtils implements Closeable {
         this(new ZkClient(zkConnectionString, sessionTimeout, connectionTimeout, new StringSerializer()), zkRoot);
     }
 
+    public ZkUtils(final String zkConnectionString) {
+        this(new ZkClient(
+                        zkConnectionString,
+                        KafkaInputFormat.DEFAULT_ZK_SESSION_TIMEOUT_MS,
+                        KafkaInputFormat.DEFAULT_ZK_CONNECTION_TIMEOUT_MS,
+                        new StringSerializer()),
+                KafkaInputFormat.DEFAULT_ZK_ROOT);
+    }
+
     /**
      * Creates a Zookeeper client based on the settings in {@link Configuration}.
      * 
      * @param config
      *            config with the Zookeeper settings in it.
-     * @see KafkaInputFormat#getZkConnect(Configuration)
-     * @see KafkaInputFormat#getZkRoot(Configuration)
-     * @see KafkaInputFormat#getZkSessionTimeoutMs(Configuration)
-     * @see KafkaInputFormat#getZkConnectionTimeoutMs(Configuration)
+     * @see KafkaInputFormat#getZkConnect(org.apache.hadoop.conf.Configuration)
+     * @see KafkaInputFormat#getZkRoot(org.apache.hadoop.conf.Configuration)
+     * @see KafkaInputFormat#getZkSessionTimeoutMs(org.apache.hadoop.conf.Configuration)
+     * @see KafkaInputFormat#getZkConnectionTimeoutMs(org.apache.hadoop.conf.Configuration)
      */
     public ZkUtils(final Configuration config) {
         this(KafkaInputFormat.getZkConnect(config), // zookeeper connection string
@@ -120,17 +126,13 @@ public class ZkUtils implements Closeable {
         String data = client.readData(getBrokerIdPath(id), true);
         if (!Strings.isNullOrEmpty(data)) {
             LOG.info("Broker " + id + " " + data);
-            // broker_ip_address-latest_offset:broker_ip_address:broker_port
-            HashMap<String,Object> result = new HashMap<String, Object>();
-            try {
-                result = new ObjectMapper().readValue(data, HashMap.class);
-            } catch (IOException e) {
-                LOG.info("Error during parsing broker information");
-            }
-            String host= (String) result.get("host");
-            int port = (Integer) result.get("port");
 
-            return new Broker(host, port, id);
+            // parse json metadata
+            JSONObject obj = new JSONObject(data);
+            String hostname = obj.getString("host");
+            Integer port = obj.getInt("port");
+
+            return new Broker(hostname, port, id);
         }
         return null;
     }
@@ -156,71 +158,36 @@ public class ZkUtils implements Closeable {
      *            the topic.
      * @return all the {@link Partition} for a given {@code topic}.
      */
-    public List<Partition> getPartitions(final String topic) throws IOException {
+    public List<Partition> getPartitions(final String topic) {
         final List<Partition> partitions = Lists.newArrayList();
-        final String partitionsInfo = client.readData(getTopicBrokerIdSubPath(topic));
-        ObjectMapper mapper = new ObjectMapper();
+        final List<String> parts = getChildrenParentMayNotExist(getTopicPartitions(topic));
+        for (final String partitionId : parts) {
+            final Integer pId = Integer.valueOf(partitionId);
+            final String data = client.readData(getTopicPartitionState(topic, pId));
 
-        Partitions topicInfo = mapper.readValue(partitionsInfo, Partitions.class);
-        Map<Integer, List<Integer>> partitionsMap = topicInfo.getPartitions();
+            // parse json metadata
+            JSONObject obj = new JSONObject(data);
+            Integer leader = obj.getInt("leader");
 
-        for (Map.Entry<Integer, List<Integer>> entry : partitionsMap.entrySet()) {
-            int partitionId = entry.getKey();
-            List<Integer> brokerList=entry.getValue();
-
-            for (int brokerId: brokerList) {
-                final Broker brokerInfo = getBroker(brokerId);
-                partitions.add(new Partition(topic, partitionId, brokerInfo));
-            }
+            final Broker broker = getBroker(leader);
+            assert leader != null;
+            partitions.add(new Partition(topic, pId, broker));
         }
-
-//        try {
-//            JsonNode actualObj = mapper.readTree(partitionsstr);
-//            actualObj.getElements();
-//        } catch (IOException e) {
-//            e.printStackTrace();
-//        }
-//        for (final String brokerId : brokersHostingTopic) {
-//            System.out.println("brokerId:!!!"+brokerId);
-//            final int bId = Integer.parseInt(brokerId);
-//            final String parts = client.readData(getTopicBrokerIdPath(topic, bId));
-//            final Broker brokerInfo = getBroker(bId);
-//            for (int i = 0; i < Integer.valueOf(parts); i++) {
-//                partitions.add(new Partition(topic, i, brokerInfo));
-//            }
-//        }
         return partitions;
     }
-    static class Partitions {
-        public void setVersion(String version) {
-            this.version = version;
-        }
 
-        public void setPartitions(Map<Integer, List<Integer>> partitions) {
-            this.partitions = partitions;
-        }
-
-        public Map<Integer, List<Integer>> getPartitions() {
-            return partitions;
-        }
-
-        private String version;
-        private Map<Integer, List<Integer>> partitions;
-    }
     /**
      * Checks whether the provided partition exists on the {@link Broker}.
-     * 
-     * @param broker
-     *            the broker.
+     *
      * @param topic
      *            the topic.
      * @param partId
      *            the partition id.
      * @return true if this partition exists on the {@link Broker}, false otherwise.
      */
-    public boolean partitionExists(final Broker broker, final String topic, final int partId) {
-        final String parts = client.readData(getTopicBrokerIdPath(topic, broker.getId()), true);
-        return !Strings.isNullOrEmpty(parts) && Ranges.closedOpen(0, Integer.parseInt(parts)).contains(partId);
+    public boolean partitionExists(final String topic, final int partId) {
+        final String parts = client.readData(getTopicPartitionState(topic, partId), true);
+        return !Strings.isNullOrEmpty(parts);
     }
 
     /**
@@ -235,6 +202,7 @@ public class ZkUtils implements Closeable {
     public long getLastCommit(String group, Partition partition) {
         final String offsetPath = getOffsetsPath(group, partition);
         final String offset = client.readData(offsetPath, true);
+        LOG.debug("Offset path: '" + offsetPath + "' value: " + offset);
 
         if (offset == null) {
             return -1L;
@@ -337,13 +305,13 @@ public class ZkUtils implements Closeable {
     }
 
     @VisibleForTesting
-    String getTopicBrokerIdSubPath(final String topic) {
-        return format("%s/brokers/topics/%s", zkRoot, topic);
+    String getTopicPartitions(final String topic) {
+        return format("%s/brokers/topics/%s/partitions", zkRoot, topic);
     }
 
     @VisibleForTesting
-    String getTopicBrokerIdPath(final String topic, final int brokerId) {
-        return format("%s/%d", getTopicBrokerIdSubPath(topic), brokerId);
+    String getTopicPartitionState(final String topic, final Integer partitionId) {
+        return format("%s/%d/state", getTopicPartitions(topic), partitionId);
     }
 
     @VisibleForTesting

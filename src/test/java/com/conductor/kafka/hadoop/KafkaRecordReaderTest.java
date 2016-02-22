@@ -96,7 +96,7 @@ public class KafkaRecordReaderTest {
         assertEquals(2048, reader.getFetchSize());
         assertEquals(0, reader.getStart());
         assertEquals(100, reader.getEnd());
-        assertEquals(0, reader.getPos());
+        assertEquals(0, reader.getCurrentPosition());
         assertEquals(0, reader.getCurrentOffset());
         assertNull("Iterator should not have been initialized yet!", reader.getCurrentMessageItr());
         assertNull("Current key should be null!", reader.getCurrentKey());
@@ -112,7 +112,7 @@ public class KafkaRecordReaderTest {
         when(mockIterator.next()).thenReturn(msg);
 
         assertTrue(reader.nextKeyValue());
-        assertEquals(100l, reader.getPos());
+        assertEquals(100l, reader.getCurrentPosition());
         assertEquals(100l, reader.getCurrentKey().get());
         assertArrayEquals(messageContent, reader.getCurrentValue().getBytes());
     }

@@ -14,16 +14,18 @@
 
 package com.conductor.kafka.hadoop;
 
-import java.io.IOException;
-import java.util.*;
-import java.util.concurrent.TimeUnit;
-
+import com.conductor.kafka.Broker;
+import com.conductor.kafka.Partition;
+import com.conductor.kafka.zk.ZkUtils;
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
 import kafka.api.PartitionOffsetRequestInfo;
 import kafka.common.TopicAndPartition;
 import kafka.javaapi.OffsetRequest;
 import kafka.javaapi.OffsetResponse;
 import kafka.javaapi.consumer.SimpleConsumer;
-
 import org.apache.commons.io.IOUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.io.BytesWritable;
@@ -32,11 +34,9 @@ import org.apache.hadoop.mapreduce.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.conductor.kafka.Broker;
-import com.conductor.kafka.Partition;
-import com.conductor.kafka.zk.ZkUtils;
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.collect.*;
+import java.io.IOException;
+import java.util.*;
+import java.util.concurrent.TimeUnit;
 
 /**
  * An {@link InputFormat} that splits up Kafka {@link Broker}-{@link Partition}s further into a set of offsets.
@@ -97,7 +97,7 @@ public class KafkaInputFormat extends InputFormat<LongWritable, BytesWritable> {
 
     @Override
     public RecordReader<LongWritable, BytesWritable> createRecordReader(final InputSplit inputSplit,
-            final TaskAttemptContext taskAttemptContext) throws IOException, InterruptedException {
+                                                                        final TaskAttemptContext taskAttemptContext) throws IOException, InterruptedException {
         return new KafkaRecordReader();
     }
 
@@ -206,7 +206,7 @@ public class KafkaInputFormat extends InputFormat<LongWritable, BytesWritable> {
 
     @VisibleForTesting
     List<Long> getOffsets(final SimpleConsumer consumer, final String topic, final int partitionNum,
-            final long lastCommit, final long asOfTime, final int maxSplitsPerPartition) {
+                          final long lastCommit, final long asOfTime, final int maxSplitsPerPartition) {
         // TODO: take advantage of new API, which allows you to request offsets for multiple topic-partitions.
 
         // all offsets that exist for this partition (in descending order)
@@ -219,17 +219,21 @@ public class KafkaInputFormat extends InputFormat<LongWritable, BytesWritable> {
         final OffsetRequest requestBeforeAsOf = toOffsetRequest(topic, partitionNum, asOfTime, 1);
         final OffsetResponse offsetsBeforeAsOfResponse = consumer.getOffsetsBefore(requestBeforeAsOf);
         final long[] offsetsBeforeAsOf = offsetsBeforeAsOfResponse.offsets(topic, partitionNum);
-        final long includeAfter = offsetsBeforeAsOf.length == 1 ? offsetsBeforeAsOf[0] : 0;
+        final long includeAfter = offsetsBeforeAsOf.length == 1 ? offsetsBeforeAsOf[0] : -1;
 
         // note that the offsets are in descending order
         List<Long> result = Lists.newArrayList();
+        LOG.debug("Offsets returned by SimpleConsumer: " + Arrays.toString(allOffsets));
         for (final long offset : allOffsets) {
             if (offset > lastCommit && offset > includeAfter) {
                 result.add(offset);
+            } else if (lastCommit == -1L && offset > includeAfter) {
+                // nothing commited yet, so consume everything
+                result.add(offset);
             } else {
-                // we add "lastCommit" iff it is after "includeAfter"
+                // we add "lastCommit" if it is after "includeAfter"
                 if (lastCommit > includeAfter) {
-                    result.add(lastCommit);
+                    result.add(lastCommit +1);
                 }
                 // we can break out of loop here bc offsets are in desc order, and we've hit the latest one to include
                 break;
@@ -245,12 +249,13 @@ public class KafkaInputFormat extends InputFormat<LongWritable, BytesWritable> {
 
     @VisibleForTesting
     static OffsetRequest toOffsetRequest(final String topic, final int partitionNum, final long asOfTime,
-            final int numOffsets) {
+                                         final int numOffsets) {
         final TopicAndPartition topicAndPartition = new TopicAndPartition(topic, partitionNum);
         final PartitionOffsetRequestInfo partitionInfoReq = new PartitionOffsetRequestInfo(asOfTime, numOffsets);
         final Map<TopicAndPartition, PartitionOffsetRequestInfo> requestInfo = ImmutableMap.of(topicAndPartition,
                 partitionInfoReq);
-        return new OffsetRequest(requestInfo, kafka.api.OffsetRequest.CurrentVersion(), "KafkaInputFormat");
+        return new OffsetRequest(requestInfo, kafka.api.OffsetRequest.CurrentVersion(),
+               "KafkaInputFormat");
     }
 
     /*

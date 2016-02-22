@@ -76,6 +76,13 @@
             <version>${hadoop.version}</version>
         </dependency>
 
+        <!--<Json>-->
+        <dependency>
+            <groupId>org.json</groupId>
+            <artifactId>json</artifactId>
+            <version>20140107</version>
+         </dependency>
+
         <!-- Guava -->
         <dependency>
             <groupId>com.google.guava</groupId>
@@ -99,9 +106,9 @@
 
         <!-- Zookeeper -->
         <dependency>
-            <groupId>com.github.sgroschupf</groupId>
+            <groupId>com.101tec</groupId>
             <artifactId>zkclient</artifactId>
-            <version>0.1</version>
+            <version>0.6</version>
         </dependency>
 
         <!-- Testing -->
